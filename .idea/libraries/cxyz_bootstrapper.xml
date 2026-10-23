@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="cxyz-bootstrapper">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/cxyz-bootstrapper.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
