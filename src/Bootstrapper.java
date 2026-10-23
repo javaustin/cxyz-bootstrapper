@@ -22,14 +22,14 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import mjson.Json;
 
-/** Downloads the artifacts declared by ~/cxyz_manifest.json. */
+/** Downloads the artifacts declared by cxyz_manifest.json. */
 public final class Bootstrapper {
     private static final String API_BASE = "https://api.cerrot.xyz";
     private static final String API_PATH = "/get_artifact";
+    private static final String MANIFEST_API_PATH = "/get_manifest";
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
-    private Bootstrapper() {
-    }
+    private Bootstrapper() {}
 
     public static void main(String[] args) {
         try {
@@ -47,21 +47,25 @@ public final class Bootstrapper {
         Path manifestPath = Path.of("cxyz_manifest.json");
         Path revisionPath = manifestPath.resolveSibling(".cxyz_revision");
 
-        if (!Files.isRegularFile(manifestPath)) {
-            throw new IOException("Manifest was not found: " + manifestPath);
-        }
-
-        Json manifest = Json.read(Files.readString(manifestPath, StandardCharsets.UTF_8));
-        requireObject(manifest, "manifest");
-        long manifestRevision = requireInteger(manifest.at("revision"), "manifest.revision");
-        long installedRevision = readRevision(revisionPath);
-        boolean revisionChanged = installedRevision != manifestRevision;
-        List<Json> artifacts = requireArray(manifest.at("artifacts"), "manifest.artifacts");
-
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(REQUEST_TIMEOUT)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
+
+        if (!Files.isRegularFile(manifestPath)) {
+            String manifestText = fetchManifest(client, identifier, secret);
+            Json fetchedManifest = parseManifest(manifestText);
+            writeManifest(manifestPath, manifestText);
+            System.out.println("Fetched manifest revision "
+                    + requireInteger(fetchedManifest.at("revision"), "manifest.revision")
+                    + " -> " + manifestPath);
+        }
+
+        Json manifest = parseManifest(Files.readString(manifestPath, StandardCharsets.UTF_8));
+        long manifestRevision = requireInteger(manifest.at("revision"), "manifest.revision");
+        long installedRevision = readRevision(revisionPath);
+        boolean revisionChanged = installedRevision != manifestRevision;
+        List<Json> artifacts = requireArray(manifest.at("artifacts"), "manifest.artifacts");
 
         for (int index = 0; index < artifacts.size(); index++) {
             Json artifact = artifacts.get(index);
@@ -84,6 +88,43 @@ public final class Bootstrapper {
                 StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
         System.out.println("Updated revision file: " + revisionPath);
+    }
+
+    private static Json parseManifest(String manifestText) {
+        Json manifest = Json.read(manifestText);
+        requireObject(manifest, "manifest");
+        requireInteger(manifest.at("revision"), "manifest.revision");
+        requireArray(manifest.at("artifacts"), "manifest.artifacts");
+        return manifest;
+    }
+
+    private static String fetchManifest(HttpClient client, String identifier, String secret)
+            throws IOException, InterruptedException, GeneralSecurityException {
+        URI requestUri = URI.create(API_BASE + MANIFEST_API_PATH);
+        HttpRequest request = authenticatedGet(identifier, secret, MANIFEST_API_PATH, requestUri);
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Manifest API returned HTTP " + response.statusCode());
+        }
+        return response.body();
+    }
+
+    private static void writeManifest(Path manifestPath, String manifestText) throws IOException {
+        Path absoluteManifest = manifestPath.toAbsolutePath().normalize();
+        Path temporary = absoluteManifest.resolveSibling(absoluteManifest.getFileName() + ".part-"
+                + Long.toUnsignedString(ThreadLocalRandom.current().nextLong()));
+        try {
+            Files.writeString(temporary, manifestText, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            try {
+                Files.move(temporary, absoluteManifest, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, absoluteManifest, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     private static long readRevision(Path revisionPath) throws IOException {
@@ -111,15 +152,7 @@ public final class Bootstrapper {
         long timestamp = System.currentTimeMillis() / 1000L;
         String signature = generateSignature(identifier, secret, timestamp, "GET", API_PATH, "");
 
-        HttpRequest request = HttpRequest.newBuilder(requestUri)
-                .timeout(REQUEST_TIMEOUT)
-                .header("X-Identifier", identifier)
-                .header("X-Timestamp", Long.toString(timestamp))
-                .header("X-Signature", signature)
-                // The API request tracker requires this header even though it is not part of the signature.
-                .header("X-Request-ID", UUID.randomUUID().toString())
-                .GET()
-                .build();
+        HttpRequest request = authenticatedGet(identifier, secret, API_PATH, requestUri);
 
         System.out.println("Requesting " + source + " -> " + target);
         HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
@@ -132,6 +165,21 @@ public final class Bootstrapper {
                 .orElseThrow(() -> new IOException("Artifact API response did not include a download URL"));
         downloadToTarget(URI.create(location), target);
         System.out.println("Downloaded " + source + " -> " + target);
+    }
+
+    private static HttpRequest authenticatedGet(String identifier, String secret, String path, URI requestUri)
+            throws GeneralSecurityException {
+        long timestamp = System.currentTimeMillis() / 1000L;
+        String signature = generateSignature(identifier, secret, timestamp, "GET", path, "");
+        return HttpRequest.newBuilder(requestUri)
+                .timeout(REQUEST_TIMEOUT)
+                .header("X-Identifier", identifier)
+                .header("X-Timestamp", Long.toString(timestamp))
+                .header("X-Signature", signature)
+                // The API request tracker requires this header even though it is not part of the signature.
+                .header("X-Request-ID", UUID.randomUUID().toString())
+                .GET()
+                .build();
     }
 
     private static void downloadToTarget(URI downloadUri, Path target) throws IOException, InterruptedException {
