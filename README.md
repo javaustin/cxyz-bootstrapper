@@ -1,21 +1,16 @@
-# CXYZ Bootstrapper
+# CXYZ com.carrotguy69.bootstrapper.Bootstrapper
 
 The `CXYZ Bootstrapper` reads `cxyz_manifest.json` from the current directory and downloads each declared artifact from the CXYZ API. If the manifest is missing, it fetches it from the authenticated `/get_manifest` endpoint.
 
-## Compile
+## Build
 
-Use JDK 11 or newer (the source uses `java.net.http.HttpClient`) and mjson 1.4.2:
+Use JDK 11 or newer and Maven. Maven downloads `mjson` 1.4.2 and the Maven Shade Plugin, then embeds mjson into the output JAR.
 
-```text
-org.sharegov:mjson:1.4.2
+```bash
+mvn package
 ```
 
-Download `mjson-1.4.2.jar` from Maven Central and place it beside the source, or resolve it with your build tool.
-
-```text
-javac --release 11 -cp mjson-1.4.2.jar -d out src/Bootstrapper.java
-jar --create --file cxyz-bootstrapper.jar --manifest MANIFEST.MF -C out .
-```
+The shaded, self-contained artifact is created at `target/cxyz-bootstrapper.jar`. It includes the bootstrapper classes, the mjson library, and the executable `Main-Class` manifest entry. No separate dependency JAR is required in production.
 
 ## Run
 
@@ -30,12 +25,12 @@ java -jar cxyz-bootstrapper.jar
 
 PowerShell (Windows):
 ```powershell
-$env:IDENTIFIER = "your-identifier"
-$env:SECRET = "your-secret"
+IDENTIFIER=your-identifier
+SECRET=your-secret
 java -jar cxyz-bootstrapper.jar
 ```
 
-Keep `mjson-1.4.2.jar` beside `cxyz-bootstrapper.jar`; the bootstrapper jar's manifest declares that runtime classpath entry.
+Copy only `target/cxyz-bootstrapper.jar` to production. Keep `cxyz_manifest.json` and the optional `.cxyz_revision` file in the directory from which the JAR is run.
 
 ## Flow
 

@@ -1,3 +1,5 @@
+package com.carrotguy69.bootstrapper;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,7 +26,7 @@ import mjson.Json;
 
 /** Downloads the artifacts declared by cxyz_manifest.json. */
 public final class Bootstrapper {
-    private static final String API_BASE = "https://api.cerrot.xyz";
+    private static String API_BASE;
     private static final String API_PATH = "/get_artifact";
     private static final String MANIFEST_API_PATH = "/get_manifest";
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
@@ -35,7 +37,7 @@ public final class Bootstrapper {
         try {
             run();
         } catch (Exception exception) {
-            System.err.println("Bootstrapper failed: " + exception.getMessage());
+            System.err.println("main.java.com.carrotguy69.bootstrapper.Bootstrapper failed: " + exception.getMessage());
             exception.printStackTrace(System.err);
             System.exit(1);
         }
@@ -43,6 +45,7 @@ public final class Bootstrapper {
 
     private static void run() throws IOException, InterruptedException, GeneralSecurityException {
         String identifier = requiredEnvironment("IDENTIFIER");
+        API_BASE = requiredEnvironment("API_BASE");
         String secret = requiredEnvironment("SECRET");
         Path manifestPath = Path.of("cxyz_manifest.json");
         Path revisionPath = manifestPath.resolveSibling(".cxyz_revision");
